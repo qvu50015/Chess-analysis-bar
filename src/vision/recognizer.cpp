@@ -268,18 +268,34 @@ Square TemplateClassifier::classify(const cv::Mat &square, bool dark) const {
       // Screen scaling places otherwise identical outlines between normalized
       // pixels. Refine the integer match instead of relaxing confidence limits.
       const auto reference = image(cv::Rect(inset, inset, side, side));
-      for (float dy : {-0.5f, 0.0f, 0.5f})
-        for (float dx : {-0.5f, 0.0f, 0.5f}) {
-          if (dx == 0 && dy == 0)
-            continue;
-          cv::Mat patch;
-          cv::getRectSubPix(observed, {side, side},
-                            {location.x + 1 + (side - 1) / 2.0f + dx,
-                             location.y + 1 + (side - 1) / 2.0f + dy},
-                            patch);
-          minimum =
-              std::min(minimum, cv::norm(patch, reference, cv::NORM_L2SQR));
-        }
+      const cv::Point2f origin(location.x + 1 + (side - 1) / 2.0f,
+                               location.y + 1 + (side - 1) / 2.0f);
+      cv::Point2f bestCenter = origin;
+      auto refine = [&](cv::Point2f center, float step) {
+        for (float dy : {-step, 0.0f, step})
+          for (float dx : {-step, 0.0f, step}) {
+            if (dx == 0 && dy == 0)
+              continue;
+            cv::Mat patch;
+            const cv::Point2f candidate(center.x + dx, center.y + dy);
+            cv::getRectSubPix(observed, {side, side}, candidate, patch);
+            const double distance = cv::norm(patch, reference, cv::NORM_L2SQR);
+            if (distance < minimum) {
+              minimum = distance;
+              bestCenter = candidate;
+            }
+          }
+      };
+      refine(origin, 0.5f);
+      const double coarseSimilarity =
+          1.0 -
+          std::sqrt(std::max(0.0, minimum) / (side * side * 3 * 255.0 * 255.0));
+      // Spend extra work only on plausible borderline candidates. Quarter-
+      // pixel alignment handles Retina sampling without weakening confidence
+      // or enlarging the integer search window.
+      if (coarseSimilarity >= thresholds_.similarity - 0.02 &&
+          coarseSimilarity < thresholds_.similarity + 0.01)
+        refine(bestCenter, 0.25f);
       const double mse =
           std::max(0.0, minimum) / (side * side * 3 * 255.0 * 255.0);
       const double similarity = std::clamp(1.0 - std::sqrt(mse), 0.0, 1.0);

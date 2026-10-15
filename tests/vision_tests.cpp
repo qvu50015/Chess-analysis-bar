@@ -264,6 +264,22 @@ int main(int argc, char **argv) {
                   cv::FILLED);
     check(selectedClassifier.classify(obscuredKnight, true).piece == '?',
           "Template background fallback cannot restore an obscured knight");
+    const auto lightQueenCapture =
+        cv::imread((root / "lichess-light-queen-alignment.png").string());
+    const auto lightQueenResult = recognize(
+        lightQueenCapture, Orientation::BlackBottom, selectedClassifier);
+    check(lightQueenResult.fenPlacement ==
+              "Q5nr/2pk1p1p/2ppb1p1/8/4P3/2qB4/PrP2PPP/1R3RK1",
+          "Real unhighlighted light-square queen recognizes the full board "
+          "without lowering confidence");
+    auto lightQueenSquare =
+        extractSquares(preprocess(lightQueenCapture))[63].clone();
+    check(selectedClassifier.classify(lightQueenSquare, false).piece == 'Q',
+          "Queen fractional alignment passes the unchanged threshold");
+    cv::rectangle(lightQueenSquare, {12, 12, 24, 24}, cv::Scalar(255, 0, 255),
+                  cv::FILLED);
+    check(selectedClassifier.classify(lightQueenSquare, false).piece == '?',
+          "Finer alignment cannot restore an obscured queen");
     QTemporaryDir incomplete;
     // Real capture regression: these pawns are identical artwork, but board
     // normalization lands their outlines on different fractional pixels.

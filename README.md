@@ -240,7 +240,8 @@ Defaults require at least 0.92 similarity and a 0.025 advantage over the next
 *distinct class*. Similarity is not a calibrated probability; even a 99% best
 match can remain Unknown if two classes are too close. Light/dark backgrounds
 are matched separately. Matching ignores an eight-pixel template rim and searches
-within ±7 normalized pixels, with half-pixel alignment refinement and cached 97%, 100%, and 103% size variants,
+within ±7 normalized pixels, with half-pixel alignment refinement, an additional
+quarter-pixel refinement for borderline candidates, and cached 97%, 100%, and 103% size variants,
 to tolerate small crop offsets, size differences, and edge labels;
 large offsets still require selecting the board more precisely. Existing saved
 templates remain compatible. Green selection/legal-square backgrounds and

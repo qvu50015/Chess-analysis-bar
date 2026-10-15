@@ -59,3 +59,8 @@ also verifies that an unrelated opaque obstruction remains unknown.
 capture. The saved knight reference has artwork in its corner patches, so this
 regression verifies the template-side inner background fallback and preserves
 rejection of an obscured knight.
+
+`lichess-light-queen-alignment.png` is the user-provided Black-bottom endgame
+with a white queen on a8. Its unhighlighted queen fell just below the unchanged
+similarity threshold with half-pixel alignment; quarter-pixel refinement must
+recognize the full position while an obscured queen remains unknown.
