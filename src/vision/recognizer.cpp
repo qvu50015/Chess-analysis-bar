@@ -186,7 +186,13 @@ TemplateClassifier::TemplateClassifier(const std::filesystem::path &directory,
     if (image.empty() || image.size() != cv::Size(SquarePixels, SquarePixels))
       throw std::invalid_argument("Invalid template: " + file.path().string());
     const bool dark = name[3] == 'd';
-    Entry entry{piece, dark, {}, squareBackground(image)};
+    auto background = squareBackground(image);
+    // Template artwork (notably a knight's base) can reach corner samples.
+    // Use the same inner fallback as captured squares so highlight correction
+    // is not silently disabled for these references.
+    if (!background)
+      background = squareBackground(image, 8);
+    Entry entry{piece, dark, {}, background};
     // Cache modest size variants; existing on-disk calibrations remain usable.
     for (int i = 0; i < 3; ++i) {
       const double scale = 1.0 + (i - 1) * 0.03;

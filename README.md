@@ -245,10 +245,11 @@ to tolerate small crop offsets, size differences, and edge labels;
 large offsets still require selecting the board more precisely. Existing saved
 templates remain compatible. Green selection/legal-square backgrounds and
 green/yellow last-move and gray-purple premove backgrounds are compensated
-when the square's corner patches agree on a uniform background and its color
+when background samples agree on a uniform color and its color
 change is within the supported range. Background pixels and anti-aliased blends
 with black/white artwork are reconstructed against the reference background,
-including the fine outlines of selected queens. Pixels inconsistent with those
+including the fine outlines of selected queens. Both saved templates and captured
+squares retry inner samples when artwork or crop edges contaminate the corners. Pixels inconsistent with those
 blends remain unchanged; piece artwork and obstructions must still pass the
 same similarity and ambiguity thresholds. Small centered green legal-move and gray-purple premove
 dots are removed only when the surrounding square is empty and their color and

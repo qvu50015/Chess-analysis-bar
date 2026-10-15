@@ -248,6 +248,22 @@ int main(int argc, char **argv) {
       check(selectedClassifier.classify(obstructed, false).piece == '?',
             "Highlight correction must not recover an obscured queen");
     }
+    const auto knightCapture =
+        cv::imread((root / "lichess-selected-dark-knight.png").string());
+    const auto knightResult =
+        recognize(knightCapture, Orientation::WhiteBottom, selectedClassifier);
+    check(knightResult.fenPlacement ==
+              "rnbqkbnr/ppp1pppp/8/3p4/4P3/2P5/PP1P1PPP/RNBQKBNR",
+          "Actual selected dark-square knight snapshot recognizes all squares");
+    const auto knightSquares = extractSquares(preprocess(knightCapture));
+    check(selectedClassifier.classify(knightSquares[62], true).piece == 'N',
+          "Selected g1 knight uses background correction despite template "
+          "corner artwork");
+    auto obscuredKnight = knightSquares[62].clone();
+    cv::rectangle(obscuredKnight, {12, 12, 24, 24}, cv::Scalar(255, 0, 255),
+                  cv::FILLED);
+    check(selectedClassifier.classify(obscuredKnight, true).piece == '?',
+          "Template background fallback cannot restore an obscured knight");
     QTemporaryDir incomplete;
     // Real capture regression: these pawns are identical artwork, but board
     // normalization lands their outlines on different fractional pixels.

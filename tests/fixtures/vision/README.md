@@ -54,3 +54,8 @@ user-provided full-board snapshots of queued premove source/destination
 backgrounds and a selected queen on light g4, respectively. Both must recognize
 the same placement with the independently saved Lichess profile. The queen test
 also verifies that an unrelated opaque obstruction remains unknown.
+
+`lichess-selected-dark-knight.png` is the user-provided selected g1 knight
+capture. The saved knight reference has artwork in its corner patches, so this
+regression verifies the template-side inner background fallback and preserves
+rejection of an obscured knight.
