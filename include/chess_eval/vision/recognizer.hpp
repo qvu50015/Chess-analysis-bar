@@ -1,0 +1,43 @@
+#pragma once
+#include "chess_eval/vision/board.hpp"
+#include <filesystem>
+#include <functional>
+#include <opencv2/core.hpp>
+namespace chess_eval::vision {
+constexpr int SquarePixels = 48;
+bool validGeometry(int width, int height);
+cv::Mat preprocess(const cv::Mat &bgr);
+std::array<cv::Mat, 64> extractSquares(const cv::Mat &normalized);
+class PieceClassifier {
+public:
+  virtual ~PieceClassifier() = default;
+  virtual Square classify(const cv::Mat &square, bool dark) const = 0;
+};
+struct Thresholds {
+  double similarity = 0.92;
+  double margin = 0.025;
+};
+class TemplateClassifier : public PieceClassifier {
+public:
+  explicit TemplateClassifier(const std::filesystem::path &directory,
+                              Thresholds thresholds = {});
+  Square classify(const cv::Mat &square, bool dark) const override;
+
+private:
+  struct Entry {
+    char piece;
+    bool dark;
+    cv::Mat image;
+  };
+  std::vector<Entry> templates_;
+  Thresholds thresholds_;
+};
+RecognitionResult recognize(const cv::Mat &bgr, Orientation orientation,
+                            const PieceClassifier &classifier,
+                            const std::function<bool()> &cancel = {});
+// Extract labeled squares from a permitted board image. Repeated calls add
+// variants.
+void exportTemplates(const cv::Mat &bgr, const Board &labels,
+                     Orientation orientation,
+                     const std::filesystem::path &directory);
+} // namespace chess_eval::vision

@@ -79,12 +79,17 @@ CapturePanel::CapturePanel(QWidget *parent, capture::BackendFactory factory)
   connect(displays_, &QComboBox::currentIndexChanged, this, [this] {
     manager_.stop();
     region_.reset();
+    emit frameCleared();
     geometry_->setText("No region selected");
     preview_->clear("Select a region on this display");
     updateButtons();
   });
   connect(&manager_, &capture::Manager::displaysChanged, this,
           &CapturePanel::refreshList);
+  connect(&manager_, &capture::Manager::frameReady, this,
+          &CapturePanel::frameAvailable);
+  connect(&manager_, &capture::Manager::cleared, this,
+          &CapturePanel::frameCleared);
   connect(&manager_, &capture::Manager::frameReady, preview_,
           &CapturePreview::setFrame);
   connect(&manager_, &capture::Manager::cleared, this,
@@ -144,6 +149,7 @@ void CapturePanel::refreshList() {
   if (!valid) {
     manager_.stop();
     region_.reset();
+    emit frameCleared();
     if (selector_)
       selector_->close();
     geometry_->setText("Display changed. Select the region again.");
@@ -172,6 +178,7 @@ void CapturePanel::selectRegion() {
     auto *selector =
         new RegionSelector(display, this, [this](capture::Region region) {
           region_ = region;
+          emit frameCleared();
           const auto pixels = capture::pixelRect(region);
           geometry_->setText(
               QString(

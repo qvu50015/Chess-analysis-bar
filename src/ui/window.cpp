@@ -1,5 +1,6 @@
 #include "chess_eval/ui/window.hpp"
 #include "chess_eval/ui/capture_panel.hpp"
+#include "chess_eval/ui/recognition_panel.hpp"
 #include <QCloseEvent>
 #include <QFormLayout>
 #include <QLabel>
@@ -21,6 +22,16 @@ Window::Window() {
   tabs->addTab(analysis, "Manual analysis");
   capture_ = new CapturePanel;
   tabs->addTab(capture_, "Screen capture");
+  recognition_ = new RecognitionPanel;
+  tabs->addTab(recognition_, "Recognition");
+  connect(capture_, &CapturePanel::frameAvailable, recognition_,
+          &RecognitionPanel::setFrame);
+  connect(capture_, &CapturePanel::frameCleared, recognition_,
+          &RecognitionPanel::clearFrame);
+  connect(recognition_, &RecognitionPanel::idle, this, [this] {
+    if (closing_)
+      close();
+  });
   connect(capture_, &CapturePanel::idle, this, [this] {
     if (closing_)
       close();
@@ -107,7 +118,8 @@ void Window::submit() {
 }
 void Window::closeEvent(QCloseEvent *event) {
   capture_->shutdown();
-  if (controller_.busy() || capture_->busy()) {
+  recognition_->shutdown();
+  if (controller_.busy() || capture_->busy() || recognition_->busy()) {
     closing_ = true;
     active_ = false;
     controller_.stop();

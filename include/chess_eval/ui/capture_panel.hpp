@@ -29,6 +29,8 @@ public:
   void shutdown();
 signals:
   void idle();
+  void frameAvailable(const chess_eval::capture::Frame &frame);
+  void frameCleared();
 
 private:
   void refreshList();
