@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <sys/wait.h>
+#include <vector>
 using namespace chess_eval;
 void check(bool ok) {
   if (!ok)
@@ -34,6 +35,14 @@ int main(int argc, char **argv) {
       // Every path must reap its child, including forced termination.
       check(waitpid(-1, nullptr, WNOHANG) == -1 && errno == ECHILD);
     }
+    setenv("CHESS_EVAL_TEST_MODE", "normal", 1);
+    std::vector<int> progress;
+    auto final = analyze(position, options, {}, [&](Score score, int depth) {
+      check(score.bound == Bound::exact);
+      check(depth == 1 || depth == 4);
+      progress.push_back(score.value);
+    });
+    check(progress == std::vector<int>({-7, -31}) && final.value == -31);
     options.executable = "/nonexistent/chess-eval-stockfish";
     bool failed = false;
     try {

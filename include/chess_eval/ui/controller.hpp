@@ -8,12 +8,14 @@
 #include <optional>
 
 namespace chess_eval::ui {
+enum class AnalysisInput { Manual, ConfirmedLive };
 class Controller : public QObject {
   Q_OBJECT
 public:
   explicit Controller(QObject *parent = nullptr);
   ~Controller() override;
-  void submit(const QString &fen, EngineOptions options);
+  void submit(const QString &fen, EngineOptions options,
+              AnalysisInput input = AnalysisInput::Manual);
   void stop();
   bool busy() const { return worker_ != nullptr; }
 signals:
@@ -27,6 +29,7 @@ private:
     Position position;
     EngineOptions options;
     quint64 generation;
+    AnalysisInput input;
   };
   void dispatch();
   QTimer debounce_;

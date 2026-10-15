@@ -30,3 +30,27 @@ fractional-pixel alignment differences after board normalization. The a2 square
 is used as a reference; e2 must classify as a white pawn without lowering the
 confidence threshold. These two crops are real Lichess Cburnett artwork, not
 synthetic glyphs. They verify this specific failure, not general theme accuracy.
+
+Highlight regressions recolor the uniform background of all synthetic classes
+and the real e2 pawn crop, leaving artwork intact. The live integration test
+recolors both the empty source and occupied destination squares after moves,
+in both orientations. These are simulated green/yellow highlights; an additional
+central occlusion must still be rejected.
+
+`legal-dots.png` is the user-provided October 15 screenshot of green legal-move
+indicators on light and dark squares, used to test empty-square recognition.
+
+`lichess-selected-pawn.png` is the user-supplied full-board capture with a
+selected black d7 pawn and legal dots on d6/d5, with Black at the bottom.
+`lichess-user-profile/` contains the existing saved Lichess calibration used
+to verify this capture independently (not templates exported from the capture).
+
+`lichess-premove-dots.png` is the user-provided White-bottom capture with
+gray-purple premove dots on d3/d4 and a selected white d2 pawn. Tests use the
+existing saved Lichess profile, including crop-offset and occlusion cases.
+
+`lichess-premove-backgrounds.png` and `lichess-selected-queen.png` are the
+user-provided full-board snapshots of queued premove source/destination
+backgrounds and a selected queen on light g4, respectively. Both must recognize
+the same placement with the independently saved Lichess profile. The queen test
+also verifies that an unrelated opaque obstruction remains unknown.

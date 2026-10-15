@@ -15,9 +15,12 @@ public:
   void setFrame(const capture::Frame &frame);
   void clearFrame();
   void shutdown();
+  QString templateDirectory() const;
+  vision::Orientation orientation() const;
   bool busy() const { return controller_.running(); }
 signals:
   void idle();
+  void configurationChanged();
 
 private:
   void request(bool calibration);

@@ -128,6 +128,42 @@ int main(int argc, char **argv) {
     waitFor([&] {
       return status.startsWith("Cannot launch") && !controller.busy();
     });
+    Controller liveEngine;
+    EngineOptions liveOptions{argv[1], 15, std::chrono::milliseconds(5000)};
+    QString liveScore, liveStatus;
+    QStringList delivered;
+    int invalidations = 0;
+    QObject::connect(&liveEngine, &Controller::evaluated, &app,
+                     [&](double, const QString &score) {
+                       liveScore = score;
+                       delivered << score;
+                     });
+    QObject::connect(&liveEngine, &Controller::statusChanged, &app,
+                     [&](const QString &value) { liveStatus = value; });
+    QObject::connect(&liveEngine, &Controller::invalidated, &app,
+                     [&] { ++invalidations; });
+    qputenv("CHESS_EVAL_TEST_MODE", "progress");
+    liveEngine.submit(white, liveOptions, AnalysisInput::ConfirmedLive);
+    check(liveEngine.busy(),
+          "Confirmed live positions skip the manual input delay");
+    waitFor([&] { return liveScore == "+0.12"; });
+    check(liveEngine.busy() && liveStatus == "Analyzing…",
+          "Live score arrives before the full search finishes");
+    delivered.clear();
+    liveEngine.submit(black, liveOptions, AnalysisInput::ConfirmedLive);
+    waitFor([&] {
+      return liveStatus == "Analysis complete" && !liveEngine.busy();
+    });
+    check(liveScore == "-0.31" && !delivered.contains("+0.31") &&
+              !delivered.contains("+0.12"),
+          "Outdated progressive results are discarded");
+    qputenv("CHESS_EVAL_TEST_MODE", "progress_eof");
+    liveEngine.submit(white, liveOptions, AnalysisInput::ConfirmedLive);
+    waitFor([&] { return liveScore == "+0.12"; });
+    int beforeFailure = invalidations;
+    waitFor([&] { return !liveEngine.busy(); });
+    check(invalidations > beforeFailure,
+          "Engine failure clears the preliminary score");
     Window window;
     window.show();
     app.processEvents();

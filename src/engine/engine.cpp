@@ -5,7 +5,8 @@
 
 namespace chess_eval {
 Score analyze(const Position &position, const EngineOptions &options,
-              const CancelCheck &cancel) {
+              const CancelCheck &cancel,
+              const std::function<void(Score, int)> &progress) {
   check_cancelled(cancel);
   if (options.depth < 1 || options.depth > 128 || options.timeout.count() <= 0)
     throw std::invalid_argument(
@@ -33,8 +34,11 @@ Score analyze(const Position &position, const EngineOptions &options,
       const auto line = process.read_line(deadline, cancel);
       if (auto info = parse_info(line);
           info && info->score.bound == Bound::exact) {
-        if (!latest || info->depth >= latest->depth)
+        if (!latest || info->depth >= latest->depth) {
           latest = info;
+          if (progress)
+            progress(white_relative(info->score, checked.turn), info->depth);
+        }
       }
       std::istringstream tokens(line);
       std::string first, completion;

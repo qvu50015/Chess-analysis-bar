@@ -117,7 +117,15 @@ RecognitionPanel::RecognitionPanel(QWidget *parent) : QWidget(parent) {
           &RecognitionPanel::idle);
   profileChanged();
 }
+QString RecognitionPanel::templateDirectory() const {
+  return directory_->text();
+}
+vision::Orientation RecognitionPanel::orientation() const {
+  return orientation_->currentIndex() == 0 ? vision::Orientation::WhiteBottom
+                                           : vision::Orientation::BlackBottom;
+}
 void RecognitionPanel::invalidate() {
+  emit configurationChanged();
   controller_.invalidate();
   if (placement_)
     placement_->clear();

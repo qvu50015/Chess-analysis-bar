@@ -2,6 +2,7 @@
 #include "chess_eval/ui/capture_panel.hpp"
 #include "chess_eval/ui/recognition_panel.hpp"
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QFormLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -70,16 +71,91 @@ Window::Window() {
       new QLabel("White grows upward · scores are from White’s perspective");
   hint->setWordWrap(true);
   layout->addWidget(hint);
+  auto *liveTab = new QWidget;
+  auto *liveLayout = new QVBoxLayout(liveTab);
+  auto *liveHint = new QLabel(
+      "Start screen capture and select calibrated templates in Recognition. "
+      "Press Start Live Analysis before the first move. White or Black at the "
+      "bottom is detected automatically from the starting board. Reset clears "
+      "the tracked game and waits for a new standard starting board. "
+      "Stockfish path and depth come from Manual analysis.");
+  liveHint->setWordWrap(true);
+  liveLayout->addWidget(liveHint);
+  auto *liveButtons = new QHBoxLayout;
+  auto *liveStart = new QPushButton("Start Live Analysis");
+  liveStart->setObjectName("startLiveButton");
+  auto *liveStop = new QPushButton("Stop Live Analysis");
+  liveStop->setObjectName("stopLiveButton");
+  liveStop->setEnabled(false);
+  liveButtons->addWidget(liveStart);
+  liveButtons->addWidget(liveStop);
+  auto *newGame = new QPushButton("Reset");
+  newGame->setObjectName("newLiveGameButton");
+  liveButtons->addWidget(newGame);
+  liveLayout->addLayout(liveButtons);
+  auto *liveStatus = new QLabel("Live analysis stopped.");
+  liveStatus->setObjectName("liveStatus");
+  liveStatus->setWordWrap(true);
+  liveLayout->addWidget(liveStatus);
+  auto *engineStatus = new QLabel;
+  engineStatus->setWordWrap(true);
+  liveLayout->addWidget(engineStatus);
+  liveLayout->addStretch();
+  tabs->addTab(liveTab, "Live analysis");
+  connect(capture_, &CapturePanel::frameAvailable, &live_,
+          &LiveController::setFrame);
+  connect(capture_, &CapturePanel::frameCleared, &live_,
+          &LiveController::clearFrame);
+  connect(recognition_, &RecognitionPanel::configurationChanged, this, [this] {
+    if (live_.active())
+      live_.stop("Recognition settings changed. Start live analysis again.");
+  });
+  auto beginLive = [this](bool reset) {
+    active_ = false;
+    live_.watch(recognition_->templateDirectory(), recognition_->orientation(),
+                reset);
+  };
+  connect(liveStart, &QPushButton::clicked, this,
+          [beginLive] { beginLive(false); });
+  connect(newGame, &QPushButton::clicked, this,
+          [beginLive] { beginLive(true); });
+  connect(liveStop, &QPushButton::clicked, this, [this] { live_.stop(); });
+  connect(&live_, &LiveController::activeChanged, this,
+          [liveStart, liveStop](bool active) {
+            liveStart->setEnabled(!active);
+            liveStop->setEnabled(active);
+          });
+  connect(&live_, &LiveController::statusChanged, liveStatus, &QLabel::setText);
+  connect(&live_, &LiveController::suspended, this, [this] {
+    if (!active_)
+      controller_.stop();
+  });
+  connect(&live_, &LiveController::positionConfirmed, this,
+          [this](const QString &fen) {
+            EngineOptions options;
+            options.executable = engine_->text().trimmed().toStdString();
+            options.depth = depth_->value();
+            controller_.submit(fen, options, AnalysisInput::ConfirmedLive);
+          });
+  connect(&live_, &LiveController::idle, this, [this] {
+    if (closing_)
+      close();
+  });
+  connect(&controller_, &Controller::statusChanged, engineStatus,
+          &QLabel::setText);
   bar_ = new EvaluationBar(this);
+  bar_->setObjectName("evaluationBar");
   bar_->setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
   bar_->setWindowTitle("Evaluation");
   bar_->show();
   connect(start, &QPushButton::clicked, this, [this] {
+    live_.stop();
     active_ = true;
     submit();
   });
   connect(stop, &QPushButton::clicked, this, [this] {
     active_ = false;
+    live_.stop();
     controller_.stop();
   });
   connect(show, &QPushButton::clicked, bar_, [this] {
@@ -89,14 +165,20 @@ Window::Window() {
   connect(fen_, &QLineEdit::textChanged, this, [this] {
     if (active_)
       submit();
-    else
+    else if (!live_.active())
       bar_->invalidate();
   });
   connect(engine_, &QLineEdit::textChanged, this, [this] {
+    if (live_.active())
+      live_.stop(
+          "Engine settings changed. Press Start Live Analysis to resume.");
     if (active_)
       submit();
   });
   connect(depth_, &QSpinBox::valueChanged, this, [this] {
+    if (live_.active())
+      live_.stop(
+          "Engine settings changed. Press Start Live Analysis to resume.");
     if (active_)
       submit();
   });
@@ -117,9 +199,11 @@ void Window::submit() {
   controller_.submit(fen_->text(), options);
 }
 void Window::closeEvent(QCloseEvent *event) {
+  live_.shutdown();
   capture_->shutdown();
   recognition_->shutdown();
-  if (controller_.busy() || capture_->busy() || recognition_->busy()) {
+  if (controller_.busy() || capture_->busy() || recognition_->busy() ||
+      live_.busy()) {
     closing_ = true;
     active_ = false;
     controller_.stop();

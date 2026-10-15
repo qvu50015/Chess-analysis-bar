@@ -35,7 +35,8 @@ void Controller::stop() {
   emit invalidated();
   emit statusChanged("Stopped");
 }
-void Controller::submit(const QString &fen, EngineOptions options) {
+void Controller::submit(const QString &fen, EngineOptions options,
+                        AnalysisInput input) {
   Position position;
   try {
     position = parse_fen(fen.toStdString());
@@ -47,14 +48,21 @@ void Controller::submit(const QString &fen, EngineOptions options) {
   const auto key = QString::fromStdString(position.fen) + '\n' +
                    QString::fromStdString(options.executable) + '\n' +
                    QString::number(options.depth) + '\n' +
-                   QString::number(options.timeout.count());
+                   QString::number(options.timeout.count()) + '\n' +
+                   QString::number(static_cast<int>(input));
   if (key == lastKey_)
     return;
   stop();
   lastKey_ = key;
-  pending_ = Request{std::move(position), std::move(options), generation_};
-  emit statusChanged("Waiting for input…");
-  debounce_.start();
+  pending_ =
+      Request{std::move(position), std::move(options), generation_, input};
+  if (input == AnalysisInput::ConfirmedLive) {
+    // The tracker has already confirmed stability; do not debounce it again.
+    dispatch();
+  } else {
+    emit statusChanged("Waiting for input…");
+    debounce_.start();
+  }
 }
 void Controller::dispatch() {
   if (worker_ || !pending_)
@@ -68,8 +76,26 @@ void Controller::dispatch() {
     std::optional<Score> score;
     QString error;
     try {
-      score = analyze(request.position, request.options,
-                      [cancel] { return cancel->load(); });
+      auto lastProgress = std::chrono::steady_clock::time_point{};
+      score = analyze(
+          request.position, request.options,
+          [cancel] { return cancel->load(); },
+          [this, &request, &lastProgress, cancel](Score value, int depth) {
+            if (request.input != AnalysisInput::ConfirmedLive ||
+                cancel->load() || (depth < 8 && value.kind != ScoreKind::mate))
+              return;
+            const auto now = std::chrono::steady_clock::now();
+            if (now - lastProgress < std::chrono::milliseconds(100))
+              return;
+            lastProgress = now;
+            QMetaObject::invokeMethod(
+                this,
+                [this, id = request.generation, value] {
+                  if (id == generation_)
+                    emit evaluated(white_share(value), displayScore(value));
+                },
+                Qt::QueuedConnection);
+          });
     } catch (const std::exception &exception) {
       error = QString::fromUtf8(exception.what());
     }
@@ -84,6 +110,7 @@ void Controller::dispatch() {
             emit statusChanged("Analysis complete");
           } else {
             lastKey_.clear();
+            emit invalidated();
             emit statusChanged(error);
           }
         },

@@ -68,10 +68,15 @@ void RecognitionController::work() {
     }
     vision::RecognitionResult result;
     QString error;
+    std::optional<chess::Observation> observation;
     try {
-      result = processor_(job.request, [this, id = job.generation] {
+      const auto cancel = [this, id = job.generation] {
         return quitting_ || generation_ != id;
-      });
+      };
+      result = processor_(job.request, cancel);
+      if (job.request.tracker)
+        observation = job.request.tracker->observe(
+            result.fenPlacement, job.request.observationMs, cancel);
     } catch (const std::exception &e) {
       error = QString::fromUtf8(e.what());
     }
@@ -80,16 +85,20 @@ void RecognitionController::work() {
         [this, id = job.generation,
          calibration = !job.request.calibrationPlacement.isEmpty(),
          saving = !job.request.saveSnapshotPath.isEmpty(),
-         result = std::move(result), error] {
+         result = std::move(result), tracker = std::move(job.request.tracker),
+         observation, error] {
           if (quitting_ || generation_ != id)
             return;
-          if (!error.isEmpty())
+          if (!error.isEmpty()) {
             emit statusChanged("Error: " + error);
-          else if (saving)
+            emit failed(error);
+          } else if (saving)
             emit statusChanged("Snapshot saved.");
           else if (calibration)
             emit statusChanged("Reference squares saved. Add examples of every "
                                "piece on both square colors.");
+          else if (tracker && observation)
+            emit tracked(result, *tracker, *observation);
           else
             emit completed(result);
         },

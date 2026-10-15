@@ -28,6 +28,7 @@ private:
     char piece;
     bool dark;
     std::array<cv::Mat, 3> images;
+    std::optional<cv::Vec3b> background;
   };
   std::vector<Entry> templates_;
   Thresholds thresholds_;

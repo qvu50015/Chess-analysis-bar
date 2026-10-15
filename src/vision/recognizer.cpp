@@ -9,6 +9,125 @@
 #include <set>
 #include <stdexcept>
 namespace chess_eval::vision {
+namespace {
+std::optional<cv::Vec3b> squareBackground(const cv::Mat &image, int inset = 2) {
+  // Sample four corner patches away from the outer border. Median and consensus
+  // tolerate coordinate labels, but reject mixed corners or an obscured square.
+  std::vector<cv::Vec3b> pixels;
+  for (int top : {inset, SquarePixels - inset - 4})
+    for (int left : {inset, SquarePixels - inset - 4})
+      for (int y = top; y < top + 4; ++y)
+        for (int x = left; x < left + 4; ++x)
+          pixels.push_back(image.at<cv::Vec3b>(y, x));
+  cv::Vec3b median;
+  for (int channel = 0; channel < 3; ++channel) {
+    std::vector<unsigned char> values;
+    for (auto p : pixels)
+      values.push_back(p[channel]);
+    std::nth_element(values.begin(), values.begin() + values.size() / 2,
+                     values.end());
+    median[channel] = values[values.size() / 2];
+  }
+  int consistent = 0;
+  for (auto p : pixels)
+    consistent += cv::norm(p, median, cv::NORM_INF) <= 12;
+  return consistent >= 48 ? std::optional<cv::Vec3b>(median) : std::nullopt;
+}
+bool indicatorColor(cv::Vec3b color) {
+  const bool green = color[1] >= color[2] && color[1] >= color[0] + 15;
+  const int darkest = std::min({color[0], color[1], color[2]});
+  const int lightest = std::max({color[0], color[1], color[2]});
+  // Premove indicators are translucent gray-purple. Exclude black/white
+  // artwork and saturated marks; geometry and empty surroundings are also
+  // required before any pixels can be removed.
+  const bool gray =
+      darkest >= 40 && lightest <= 180 && lightest - darkest <= 25;
+  return green || gray;
+}
+// A target dot is a small green or gray-purple disk on an otherwise empty
+// square. Require both its geometry and all surrounding pixels; never erase a
+// region merely because its color matches an indicator.
+cv::Mat removeLegalDot(const cv::Mat &square, cv::Vec3b background) {
+  cv::Mat mask = cv::Mat::zeros(square.size(), CV_8U);
+  for (int y = 8; y < SquarePixels - 8; ++y)
+    for (int x = 8; x < SquarePixels - 8; ++x)
+      if (cv::norm(square.at<cv::Vec3b>(y, x), background, cv::NORM_INF) > 18)
+        mask.at<unsigned char>(y, x) = 255;
+  std::vector<cv::Point> points;
+  cv::findNonZero(mask, points);
+  if (points.empty())
+    return square;
+  int left = SquarePixels, top = SquarePixels, right = 0, bottom = 0;
+  for (auto point : points) {
+    left = std::min(left, point.x);
+    top = std::min(top, point.y);
+    right = std::max(right, point.x);
+    bottom = std::max(bottom, point.y);
+  }
+  const cv::Rect bounds(left, top, right - left + 1, bottom - top + 1);
+  const double cx = bounds.x + (bounds.width - 1) / 2.0;
+  const double cy = bounds.y + (bounds.height - 1) / 2.0;
+  const double radius = (bounds.width + bounds.height) / 4.0;
+  if (std::abs(cx - 23.5) > 7 || std::abs(cy - 23.5) > 7 || radius < 5 ||
+      radius > 9 || std::abs(bounds.width - bounds.height) > 2)
+    return square;
+  const auto dot = square.at<cv::Vec3b>(cvRound(cy), cvRound(cx));
+  if (!indicatorColor(dot) || cv::norm(dot, background, cv::NORM_INF) < 20)
+    return square;
+  for (int y = 8; y < SquarePixels - 8; ++y)
+    for (int x = 8; x < SquarePixels - 8; ++x) {
+      const double distance = std::hypot(x - cx, y - cy);
+      const auto pixel = square.at<cv::Vec3b>(y, x);
+      if (distance < radius - 1.5 && cv::norm(pixel, dot, cv::NORM_INF) > 18)
+        return square;
+      if (distance > radius + 0.5 &&
+          cv::norm(pixel, background, cv::NORM_INF) > 18)
+        return square;
+    }
+  auto cleaned = square.clone();
+  cleaned(cv::Rect(4, 4, SquarePixels - 8, SquarePixels - 8)) =
+      cv::Scalar(background[0], background[1], background[2]);
+  return cleaned;
+}
+cv::Mat restoreHighlight(const cv::Mat &square, cv::Vec3b observed,
+                         cv::Vec3b reference) {
+  auto corrected = square.clone();
+  for (int y = 0; y < corrected.rows; ++y)
+    for (int x = 0; x < corrected.cols; ++x) {
+      auto &pixel = corrected.at<cv::Vec3b>(y, x);
+      // Reconstruct anti-aliased black/white artwork against the reference
+      // background. Hard replacement leaves a colored fringe around intricate
+      // pieces such as queens. Pixels inconsistent with either blend stay as
+      // observed, so colored obstructions are still rejected by matching.
+      double bestError = 10.0;
+      cv::Vec3b replacement = pixel;
+      for (double foreground : {0.0, 255.0}) {
+        cv::Vec3d direction, delta;
+        for (int c = 0; c < 3; ++c) {
+          direction[c] = foreground - observed[c];
+          delta[c] = double(pixel[c]) - observed[c];
+        }
+        const double denominator = direction.dot(direction);
+        if (denominator < 1)
+          continue;
+        const double alpha =
+            std::clamp(delta.dot(direction) / denominator, 0.0, 1.0);
+        double error = 0;
+        for (int c = 0; c < 3; ++c)
+          error = std::max(error, std::abs(delta[c] - alpha * direction[c]));
+        if (error <= bestError) {
+          bestError = error;
+          for (int c = 0; c < 3; ++c)
+            replacement[c] = cv::saturate_cast<unsigned char>(
+                alpha * foreground + (1 - alpha) * reference[c]);
+        }
+      }
+      pixel = replacement;
+    }
+  return corrected;
+}
+} // namespace
+
 bool validGeometry(int width, int height) {
   return width >= 128 && height >= 128 && width <= 8192 && height <= 8192 &&
          std::abs(static_cast<double>(width) / height - 1) <= 0.04;
@@ -67,13 +186,13 @@ TemplateClassifier::TemplateClassifier(const std::filesystem::path &directory,
     if (image.empty() || image.size() != cv::Size(SquarePixels, SquarePixels))
       throw std::invalid_argument("Invalid template: " + file.path().string());
     const bool dark = name[3] == 'd';
-    Entry entry{piece, dark, {}};
+    Entry entry{piece, dark, {}, squareBackground(image)};
     // Cache modest size variants; existing on-disk calibrations remain usable.
     for (int i = 0; i < 3; ++i) {
       const double scale = 1.0 + (i - 1) * 0.03;
       const double center = (SquarePixels - 1) / 2.0;
-      const cv::Matx23d transform(scale, 0, center * (1 - scale),
-                                 0, scale, center * (1 - scale));
+      const cv::Matx23d transform(scale, 0, center * (1 - scale), 0, scale,
+                                  center * (1 - scale));
       cv::warpAffine(image, entry.images[i], transform, image.size(),
                      cv::INTER_LINEAR, cv::BORDER_REPLICATE);
     }
@@ -92,9 +211,41 @@ Square TemplateClassifier::classify(const cv::Mat &square, bool dark) const {
       square.size() != cv::Size(SquarePixels, SquarePixels))
     return {};
   std::map<char, double> bestByClass;
+  auto background = squareBackground(square);
+  // A slightly shifted board crop mixes neighboring colors at the corners.
+  // Retry inside the template rim before rejecting a legal-target dot.
+  if (!background)
+    background = squareBackground(square, 8);
+  const cv::Mat cleaned =
+      background ? removeLegalDot(square, *background) : square;
+  std::map<int, cv::Mat> correctedByColor;
   for (const auto &entry : templates_) {
     if (entry.dark != dark)
       continue;
+    cv::Mat observed = cleaned;
+    if (background && entry.background) {
+      const double change =
+          cv::norm(*background, *entry.background, cv::NORM_INF);
+      // Green selection/legal-square and yellow last-move highlights. Do not
+      // turn arbitrary solid-color occlusions into confidently empty squares.
+      const bool highlight = (*background)[1] >= (*background)[0] + 15 &&
+                             ((*background)[2] >= (*background)[0] + 15 ||
+                              (*background)[1] >= (*background)[2] + 15);
+      const auto color = *background;
+      const bool premove =
+          color[0] >= 80 && color[0] <= 145 && color[1] >= 70 &&
+          color[1] <= 140 && color[2] >= 80 && color[2] <= 145 &&
+          color[0] >= color[1] + 5 && color[2] >= color[1] + 3 &&
+          std::abs(int(color[0]) - int(color[2])) <= 12;
+      if ((highlight || premove) && change > 6 && change <= 110) {
+        const auto color = *entry.background;
+        const int key = color[0] | (color[1] << 8) | (color[2] << 16);
+        auto [it, inserted] = correctedByColor.try_emplace(key);
+        if (inserted)
+          it->second = restoreHighlight(cleaned, *background, color);
+        observed = it->second;
+      }
+    }
     // Compare the central artwork over a wider translation window, excluding
     // the outermost captured pixels where neighboring squares can intrude.
     // All variants compete as one class, so they cannot create false ambiguity.
@@ -103,7 +254,7 @@ Square TemplateClassifier::classify(const cv::Mat &square, bool dark) const {
     for (const auto &image : entry.images) {
       cv::Mat distance;
       cv::matchTemplate(
-          square(cv::Rect(1, 1, SquarePixels - 2, SquarePixels - 2)),
+          observed(cv::Rect(1, 1, SquarePixels - 2, SquarePixels - 2)),
           image(cv::Rect(inset, inset, side, side)), distance, cv::TM_SQDIFF);
       double minimum;
       cv::Point location;
@@ -116,11 +267,12 @@ Square TemplateClassifier::classify(const cv::Mat &square, bool dark) const {
           if (dx == 0 && dy == 0)
             continue;
           cv::Mat patch;
-          cv::getRectSubPix(square, {side, side},
+          cv::getRectSubPix(observed, {side, side},
                             {location.x + 1 + (side - 1) / 2.0f + dx,
                              location.y + 1 + (side - 1) / 2.0f + dy},
                             patch);
-          minimum = std::min(minimum, cv::norm(patch, reference, cv::NORM_L2SQR));
+          minimum =
+              std::min(minimum, cv::norm(patch, reference, cv::NORM_L2SQR));
         }
       const double mse =
           std::max(0.0, minimum) / (side * side * 3 * 255.0 * 255.0);
@@ -138,7 +290,14 @@ Square TemplateClassifier::classify(const cv::Mat &square, bool dark) const {
     } else
       second = std::max(second, score);
   }
-  if (best < thresholds_.similarity || best - second < thresholds_.margin)
+  // If a central indicator-colored mark failed the empty-dot check, template
+  // alignment must not dodge the remaining artwork and call it empty.
+  const auto center = square.at<cv::Vec3b>(24, 24);
+  const bool unverifiedMark = background && cleaned.data == square.data &&
+                              indicatorColor(center) &&
+                              cv::norm(center, *background, cv::NORM_INF) >= 15;
+  if ((piece == '.' && unverifiedMark) || best < thresholds_.similarity ||
+      best - second < thresholds_.margin)
     piece = '?';
   return {piece, std::max(0.0, best)};
 }

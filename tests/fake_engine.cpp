@@ -28,6 +28,12 @@ int main() {
     } else if (line.starts_with("position fen ") && ready)
       position = true;
     else if (line.starts_with("go depth ") && position) {
+      if (mode == "progress" || mode == "progress_eof") {
+        std::cout << "info depth 8 score cp 12\n" << std::flush;
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        if (mode == "progress_eof")
+          return 0;
+      }
       if (mode == "slow")
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
       if (mode == "search_eof")
@@ -40,6 +46,8 @@ int main() {
         std::cout << "info depth 4 score cp nope\n";
       else if (mode == "mate")
         std::cout << "info depth 4 score mate -2\n";
+      else if (mode == "progress")
+        std::cout << "info depth 12 score cp 31\n";
       else {
         std::cout << "info depth 1 score cp 7\ninfo depth 4 score cp 31\n";
         std::cout << "info depth 4 score cp 99 lowerbound\ninfo depth 2 score "

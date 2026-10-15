@@ -1,12 +1,12 @@
-# Chess Evaluation Bar — M4 Manual Recognition
+# Chess Evaluation Bar — M5 Live Analysis
 
 A C++20 / Qt 6 desktop application with a small, resizable, floating black-and-white
 evaluation bar and a manual FEN settings window. Stockfish evaluates each position
 asynchronously. The original evaluation-only CLI is also included. A separate Screen capture tab
-provides region selection and a live preview using ScreenCaptureKit. Captured
-frames never trigger Stockfish analysis. A Recognition tab adds explicit,
-OpenCV-based template recognition and calibration for separate theme profiles.
-Move tracking, move suggestions, and principal-variation display are not implemented.
+provides region selection and a live preview using ScreenCaptureKit. A Recognition
+tab provides OpenCV template calibration and manual recognition. The Live analysis
+tab connects capture, recognition, legal position tracking, and Stockfish when
+explicitly started. Analysis output is limited to the evaluation bar and score.
 
 ## Install prerequisites (macOS)
 
@@ -243,12 +243,24 @@ are matched separately. Matching ignores an eight-pixel template rim and searche
 within ±7 normalized pixels, with half-pixel alignment refinement and cached 97%, 100%, and 103% size variants,
 to tolerate small crop offsets, size differences, and edge labels;
 large offsets still require selecting the board more precisely. Existing saved
-templates remain compatible. Thresholds are explicit `vision::Thresholds` parameters
+templates remain compatible. Green selection/legal-square backgrounds and
+green/yellow last-move and gray-purple premove backgrounds are compensated
+when the square's corner patches agree on a uniform background and its color
+change is within the supported range. Background pixels and anti-aliased blends
+with black/white artwork are reconstructed against the reference background,
+including the fine outlines of selected queens. Pixels inconsistent with those
+blends remain unchanged; piece artwork and obstructions must still pass the
+same similarity and ambiguity thresholds. Small centered green legal-move and gray-purple premove
+dots are removed only when the surrounding square is empty and their color and
+circular shape match. Dot detection tolerates small crop offsets and samples
+inside square edges when neighboring colors contaminate the corners; low-contrast
+green dots on dark squares are also supported. Rings or overlays that obscure
+piece artwork may still require deselecting the piece. No highlight templates are required. Thresholds are explicit `vision::Thresholds` parameters
 in the core API. Do not lower them simply to make uncertain boards appear valid.
 
 Inputs must be full, axis-aligned boards, 128–8192 pixels per side with no more
 than 4% aspect distortion. Preprocessing resizes to 384×384, applies a small
-Gaussian blur, and extracts 64 48×48 squares. Blurred, obscured, highlighted,
+Gaussian blur, and extracts 64 48×48 squares. Blurred, obscured, unusually highlighted,
 misaligned, or unfamiliar artwork can yield Unknown or incorrect matches.
 Matching does not support arbitrary themes. Both orientations and different
 resolutions are tested synthetically, but real browser/Retina alignment and
@@ -289,7 +301,104 @@ geometry, padded image rows, ambiguous templates, FEN placement validation,
 request coalescing, stale-result rejection, GUI responsiveness, profile isolation,
 and the captured-frame → Recognize button → displayed placement path. Existing
 M1–M3 tests remain enabled. Manual testing with your site screenshots and actual
-screen permissions is still required. No M5 tracking is implemented.
+screen permissions is still required. Live tracking is described below.
+
+## Live analysis (M5)
+
+1. Calibrate the desired Chess.com or Lichess profile in **Recognition**, including
+   all piece/background combinations. The orientation setting there applies to
+   manual recognition/calibration; live analysis detects orientation automatically.
+2. Select the board region and **Start Capture** in **Screen capture**.
+3. Set the Stockfish executable and depth in **Manual analysis**.
+4. Open **Live analysis** and click **Start Live Analysis** before the first move.
+   Keep the standard starting board visible until the position is confirmed.
+   White-at-bottom and Black-at-bottom boards are detected automatically; White
+   still moves first regardless of which color you play. No FEN or turn setting
+   is required. Midgame initialization is not supported.
+5. **Stop Live Analysis** cancels analysis and freezes the bar. Start resumes the
+   tracked game when capture and recognition settings are unchanged, retaining
+   the detected orientation and full game state.
+6. **Reset** cancels outdated work, clears tracked history, and waits for a new
+   standard starting board. It detects the orientation again for the new game.
+
+Each new placement must remain consistent across at least two recognition
+observations spanning 300 ms and match an unambiguous legal continuation from the
+tracked position. The tracker first searches two plies (one move and one reply), then automatically
+widens recovery to four plies when needed, so fast moves between captured
+observations can be recovered without pressing Reset.
+All matching paths must agree on the complete FEN, including hidden state.
+Moves that expose the moving side's king are rejected. Castling,
+en passant, captures, and all four promotion choices update the full FEN
+internally, including rights and counters. This supports standard chess;
+Chess960 is not supported.
+
+Animations, unknown squares, and unmatched placements suspend the current
+score once observed. The bar stays frozen and the score shows `—`, but live
+recognition keeps watching without a three-second shutdown deadline. The status
+identifies unreadable squares. A stable current position or a unique continuation
+of at most four plies recovers automatically, including after longer obstructions. Unmatched boards
+never overwrite the tracked state. Extended recovery is cancellable and limited
+to 100,000 search nodes; an incomplete search never publishes a partial match. If more than four plies were missed, or legal
+paths disagree about the full FEN, tracking can remain frozen. Use Reset before the first move of the next game.
+The app never silently resets history or guesses which side should move.
+
+Pixels cannot establish castling rights, en passant, or move counters. Live
+analysis starts with standard-game rights and counters, then updates these fields
+from legal moves. A FEN does not encode repetition history, so the app does not adjudicate
+repetition draws. Standard chess is supported; Chess960 is not supported.
+
+Changing capture session/region discards the old tracking session and stops live
+analysis. Changing recognition settings stops live analysis; changing the template
+path or orientation initializes a new tracking session on Start. Manual
+recognition/calibration also stops live tracking before modifying its inputs.
+Starting manual analysis switches out of live mode. Both modes share one engine
+controller, so searches cannot overlap. Template errors pause live analysis with
+an actionable message. Engine errors appear in the Live analysis tab; correct the
+settings and Stop/Start to retry the retained game. **Reset** establishes a new
+standard starting baseline for a new game; Stop/Start alone does not reset history.
+
+Recognition and bounded legal recovery run on a persistent worker, at most four
+requests per second, with one in-flight request and one latest captured frame. Tracking uses a worker-owned
+copy and only publishes it if the request generation is still current. Recovery
+is cancellable, enumerates legal successors without repeated move validation,
+and caches failed placements until the candidate or authoritative state changes.
+Templates are cached for the session and reloaded on Start; identical images reuse the last recognition result.
+ScreenCaptureKit may not deliver new frames for a static screen, so the latest
+unchanged image is retained for stability checks until a new frame or capture-stop
+notification arrives. No image processing or engine I/O runs on the Qt thread.
+Confirmed live positions launch the cancellable engine controller immediately,
+skipping the 350 ms debounce reserved for manual FEN edits. The live bar shows an
+early white-relative exact score from depth 8 (or a mate score), then refines it
+while Stockfish continues to the configured depth. Early scores may change as
+search deepens; the status remains **Analyzing…** until completion. Intermediate
+updates are limited to ten per second. Generation IDs discard both intermediate
+and final results from stopped or superseded work, and engine errors invalidate
+any preliminary score. Unchanged tracked positions do not trigger additional
+searches. Board stability and legal-move checks are unchanged. The recognition debug board remains
+an explicit M4 troubleshooting tool; live mode displays no moves or engine lines.
+
+Modules:
+
+- `chess/game`: standard-chess legal moves and complete FEN state.
+- `chess/tracker`: stable observations, unique legal transitions, and safe recovery.
+- `ui/live_controller`: bounded asynchronous recognition, template caching, capture
+  lifecycle handling, and confirmed-position/suspension signals.
+- `ui/window`: live controls and integration with the shared evaluation controller.
+
+`position_tracking` tests standard move-tree counts (including castling and en
+passant positions), checks/pins, promotions, complete FEN transitions, animations,
+resets, two- through four-ply recovery (including castling, en passant and
+promotion), search cancellation, and ambiguous histories that must stay frozen. `live_analysis` runs synthetic captured boards through
+real OpenCV recognition, tracking, the UCI fake engine, and the evaluation widget
+in both orientations. It also covers both profile selectors, slow recognition,
+rapid frame replacement, skipped intermediate boards followed by automatic
+evaluation, automatic starting-board orientation for both colors,
+Stop/Start orientation retention, Reset with a flipped board, highlighted move squares,
+stale-result cancellation, capture loss, template errors,
+and responsive shutdown. Existing M1–M4 tests and optional real-Stockfish tests
+remain enabled. These automated checks do not establish live-site recognition
+accuracy; real screen permissions, animations, and theme calibration still require
+manual verification on the user's display.
 
 ## Run the CLI
 
