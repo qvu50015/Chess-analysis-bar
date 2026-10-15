@@ -1,9 +1,11 @@
-# Chess Evaluation Bar — M2 Qt Evaluation Bar
+# Chess Evaluation Bar — M3 Screen Capture
 
 A C++20 / Qt 6 desktop application with a small, resizable, floating black-and-white
 evaluation bar and a manual FEN settings window. Stockfish evaluates each position
-asynchronously. The original evaluation-only CLI is also included. There is no
-screen capture, computer vision, move suggestion, or principal-variation display.
+asynchronously. The original evaluation-only CLI is also included. A separate Screen capture tab
+provides region selection and a live preview using ScreenCaptureKit. Captured
+frames never trigger Stockfish analysis. Computer vision, move suggestions, and
+principal-variation display are not implemented.
 
 ## Install prerequisites (macOS)
 
@@ -78,6 +80,84 @@ cmake -S . -B build-cli -DBUILD_GUI=OFF
 cmake --build build-cli -j 4
 ctest --test-dir build-cli --output-on-failure
 ```
+
+## Screen capture (M3)
+
+The macOS capture backend requires ScreenCaptureKit (introduced in macOS 12.3).
+The project defaults to a macOS 13 deployment target; your installed Qt version
+may require a newer macOS. Build with a recent Apple SDK containing
+ScreenCaptureKit. CMake enables Objective-C++ with ARC and links Apple's
+ScreenCaptureKit, CoreGraphics, CoreMedia, CoreVideo, and Foundation frameworks.
+No additional third-party capture library is required. Non-macOS builds retain
+manual analysis but report capture as unsupported.
+
+1. Launch `./build/chess-eval-bar` and open **Screen capture**.
+2. Choose the display. **Refresh displays** reloads the monitor list.
+3. Click **Select Region**, drag around the visible board, and inspect the
+   highlighted rectangle. Press **Enter** to confirm or **Esc** to cancel.
+4. The selected display, local point coordinates, and output pixel dimensions
+   appear above the preview. Click **Start Capture**.
+5. Click **Stop Capture** to end the stream. To change regions, stop first, select
+   another rectangle, and start again. No application restart is needed.
+
+On first Start Capture, macOS may ask for Screen Recording permission. In
+**System Settings → Privacy & Security → Screen & System Audio Recording**
+(**Screen Recording** on older versions), enable the application or the terminal
+used to launch it. Quit and relaunch after granting permission if needed. The
+backend requests permission at most once per application run, only after Start;
+it never requests permission when opening the app or running automated tests.
+Permission failures appear as an Error with instructions in the capture tab.
+
+Capture targets 12 FPS, hides the cursor, and requests only the selected source
+rectangle. The preview preserves aspect ratio with empty margins. Static content
+may deliver fewer complete frames; incomplete/idle frames leave the last valid
+preview visible. Stop clears the preview and ends capture. Keep the application
+windows outside the selected area to avoid capturing the preview itself. Screen
+content covered by another window is captured as visible; protected content may
+be blank. Selection is rectangular, confined to one display, and stored only for
+the current run. Display layout/scaling changes can require selecting again.
+
+Capture architecture:
+
+- `include/chess_eval/capture/types.hpp`, `src/capture/types.cpp`: display-local
+  point geometry, global-to-local conversion, Retina pixel dimensions, frame
+  validation, aspect fitting, and the capture session state machine.
+- `src/capture/mac_backend.mm`: asynchronous ScreenCaptureKit operations on a
+  serial dispatch queue; native permission checks, display enumeration, and one
+  BGRA pixel copy into owned Qt image storage per complete frame.
+- `src/capture/backend.cpp`, `src/capture/manager.cpp`: a thread-safe, latest-frame
+  mailbox and GUI-thread delivery. A stopped or superseded session cannot update
+  the preview. Native frame queues are limited to three surfaces; the mailbox
+  retains only the latest frame, so a slow GUI cannot accumulate frame history.
+- `src/ui/region_selector.cpp`, `src/ui/capture_panel.cpp`: transparent selection
+  overlay, capture controls/status, and an aspect-preserving preview.
+
+Future frame consumers can connect to `capture::Manager::frameReady`. A `Frame`
+contains an owned `QImage` (width, height, stride, BGRA/ARGB32 layout), monotonic
+media timestamp in nanoseconds, session ID, source region, display ID, global
+logical display bounds, and display scale. Images are implicitly shared and must
+be treated as immutable after publication. A heavy future consumer should use a
+bounded mailbox instead of queueing every frame. No recognition or FEN generation
+is included in M3.
+
+### Verification
+
+`ctest --test-dir build --output-on-failure` includes the existing M1/M2 suites
+and `capture_logic`. On macOS, `native_capture_lifetime` also exercises deferred
+ScreenCaptureKit enumeration and stop callbacks with mocked native responses,
+verifying session ownership after the initiating function returns without screen
+access. The capture suite uses mock frames without screen permission
+and tests invalid/out-of-bounds rectangles, negative monitor origins, Retina and
+fractional scales, frame metadata, aspect ratios, session transitions, stale
+frames/errors, bounded latest-frame delivery, preview rendering, and confirming
+a region followed by pressing Start Capture.
+
+Manual macOS checks remain necessary: grant/deny actual screen permission; select
+boards on Retina and external displays (including displays left of the primary);
+compare the visible crop with the selection; resize the preview; stop/restart
+rapidly; unplug a display; and close the application during capture. Verify manual
+FEN analysis still works independently. Automated tests do not verify real screen
+pixels, native permission dialogs, or physical monitor alignment.
 
 ## Run the CLI
 

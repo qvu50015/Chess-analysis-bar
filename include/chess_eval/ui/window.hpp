@@ -6,6 +6,7 @@ class QLineEdit;
 class QSpinBox;
 class QLabel;
 namespace chess_eval::ui {
+class CapturePanel;
 class Window : public QWidget {
 public:
   Window();
@@ -16,6 +17,7 @@ protected:
 private:
   void submit();
   Controller controller_;
+  CapturePanel *capture_;
   EvaluationBar *bar_;
   QLineEdit *fen_;
   QLineEdit *engine_;

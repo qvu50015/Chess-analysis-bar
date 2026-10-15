@@ -1,0 +1,23 @@
+{
+  "configurations": [
+    {
+      "name": "macOS",
+      "compilerPath": "/usr/bin/clang++",
+      "cppStandard": "c++20",
+      "cStandard": "c17",
+      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+      "includePath": [
+        "${workspaceFolder}/include",
+        "/opt/homebrew/opt/qt/include",
+        "/opt/homebrew/opt/qt/include/QtCore",
+        "/opt/homebrew/opt/qt/include/QtGui",
+        "/opt/homebrew/opt/qt/include/QtWidgets"
+      ],
+      "macFrameworkPath": [
+        "/opt/homebrew/opt/qt/lib",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+      ]
+    }
+  ],
+  "version": 4
+}

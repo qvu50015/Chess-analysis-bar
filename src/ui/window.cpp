@@ -1,4 +1,5 @@
 #include "chess_eval/ui/window.hpp"
+#include "chess_eval/ui/capture_panel.hpp"
 #include <QCloseEvent>
 #include <QFormLayout>
 #include <QLabel>
@@ -6,12 +7,24 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QTabWidget>
 #include <QVBoxLayout>
 namespace chess_eval::ui {
 Window::Window() {
   setWindowTitle("Chess evaluation — Position");
-  resize(540, 270);
+  resize(620, 570);
   auto *layout = new QVBoxLayout(this);
+  auto *tabs = new QTabWidget;
+  layout->addWidget(tabs);
+  auto *analysis = new QWidget;
+  layout = new QVBoxLayout(analysis);
+  tabs->addTab(analysis, "Manual analysis");
+  capture_ = new CapturePanel;
+  tabs->addTab(capture_, "Screen capture");
+  connect(capture_, &CapturePanel::idle, this, [this] {
+    if (closing_)
+      close();
+  });
   auto *form = new QFormLayout;
   fen_ =
       new QLineEdit("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
@@ -93,12 +106,13 @@ void Window::submit() {
   controller_.submit(fen_->text(), options);
 }
 void Window::closeEvent(QCloseEvent *event) {
-  if (controller_.busy()) {
+  capture_->shutdown();
+  if (controller_.busy() || capture_->busy()) {
     closing_ = true;
     active_ = false;
     controller_.stop();
     setEnabled(false);
-    status_->setText("Stopping engine…");
+    status_->setText("Stopping background work…");
     event->ignore();
     return;
   }
