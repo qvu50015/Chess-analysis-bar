@@ -72,7 +72,42 @@ int main(int argc, char **argv) {
                 calibrationLabels.squares[i].piece,
             "Small alignment offsets preserve classification");
     }
+    // Exercise the capture path, including fractional alignment, scale drift,
+    // and isolated damaged pixels rather than only integer square translations.
+    const auto cleanBoard = cv::imread((root / "synthetic-white.png").string());
+    for (double scale : {0.99, 1.0, 1.01}) {
+      for (double offset : {-4.5, 4.5}) {
+        cv::Mat altered;
+        const cv::Matx23d transform(scale, 0, 192 * (1 - scale) + offset,
+                                    0, scale, 192 * (1 - scale) - offset);
+        cv::warpAffine(cleanBoard, altered, transform, cleanBoard.size(),
+                       cv::INTER_LINEAR, cv::BORDER_REPLICATE);
+        cv::RNG noise(42);
+        for (int n = 0; n < 192; ++n)
+          altered.at<cv::Vec3b>(noise.uniform(0, altered.rows),
+                               noise.uniform(0, altered.cols)) = {255, 0, 255};
+        check(recognize(altered, Orientation::WhiteBottom, classifier)
+                      .fenPlacement == expected,
+              "Small crop shifts, scale drift and pixel noise preserve board");
+      }
+    }
     QTemporaryDir incomplete;
+    // Real capture regression: these pawns are identical artwork, but board
+    // normalization lands their outlines on different fractional pixels.
+    QTemporaryDir fractional;
+    for (const auto &entry :
+         std::filesystem::directory_iterator(temp.path().toStdString()))
+      std::filesystem::copy_file(
+          entry.path(), std::filesystem::path(fractional.path().toStdString()) /
+                            entry.path().filename());
+    std::filesystem::copy_file(
+        root / "lichess-a2.png",
+        std::filesystem::path(fractional.path().toStdString()) / "wP_l_0.png",
+        std::filesystem::copy_options::overwrite_existing);
+    TemplateClassifier fractionalClassifier(fractional.path().toStdString());
+    check(fractionalClassifier.classify(
+              cv::imread((root / "lichess-e2.png").string()), false).piece == 'P',
+          "Real pawn outline survives fractional-pixel alignment");
     rejects(
         [&] { TemplateClassifier missing(incomplete.path().toStdString()); });
     QTemporaryDir ambiguous;

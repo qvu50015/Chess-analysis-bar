@@ -27,7 +27,7 @@ private:
   struct Entry {
     char piece;
     bool dark;
-    cv::Mat image;
+    std::array<cv::Mat, 3> images;
   };
   std::vector<Entry> templates_;
   Thresholds thresholds_;

@@ -67,7 +67,17 @@ TemplateClassifier::TemplateClassifier(const std::filesystem::path &directory,
     if (image.empty() || image.size() != cv::Size(SquarePixels, SquarePixels))
       throw std::invalid_argument("Invalid template: " + file.path().string());
     const bool dark = name[3] == 'd';
-    templates_.push_back({piece, dark, image});
+    Entry entry{piece, dark, {}};
+    // Cache modest size variants; existing on-disk calibrations remain usable.
+    for (int i = 0; i < 3; ++i) {
+      const double scale = 1.0 + (i - 1) * 0.03;
+      const double center = (SquarePixels - 1) / 2.0;
+      const cv::Matx23d transform(scale, 0, center * (1 - scale),
+                                 0, scale, center * (1 - scale));
+      cv::warpAffine(image, entry.images[i], transform, image.size(),
+                     cv::INTER_LINEAR, cv::BORDER_REPLICATE);
+    }
+    templates_.push_back(std::move(entry));
     ++coverage[{piece, dark}];
   }
   for (char piece : std::string(".PNBRQKpnbrqk"))
@@ -85,21 +95,38 @@ Square TemplateClassifier::classify(const cv::Mat &square, bool dark) const {
   for (const auto &entry : templates_) {
     if (entry.dark != dark)
       continue;
-    cv::Mat distance;
-    // Ignore edge labels/borders and allow at most three normalized pixels
-    // of translation. Keep the same absolute-error and ambiguity thresholds.
-    constexpr int inset = 4;
+    // Compare the central artwork over a wider translation window, excluding
+    // the outermost captured pixels where neighboring squares can intrude.
+    // All variants compete as one class, so they cannot create false ambiguity.
+    constexpr int inset = 8;
     constexpr int side = SquarePixels - 2 * inset;
-    cv::matchTemplate(
-        square(cv::Rect(1, 1, SquarePixels - 2, SquarePixels - 2)),
-        entry.image(cv::Rect(inset, inset, side, side)), distance,
-        cv::TM_SQDIFF);
-    double minimum;
-    cv::minMaxLoc(distance, &minimum);
-    const double mse =
-        std::max(0.0, minimum) / (side * side * 3 * 255.0 * 255.0);
-    const double similarity = std::clamp(1.0 - std::sqrt(mse), 0.0, 1.0);
-    bestByClass[entry.piece] = std::max(bestByClass[entry.piece], similarity);
+    for (const auto &image : entry.images) {
+      cv::Mat distance;
+      cv::matchTemplate(
+          square(cv::Rect(1, 1, SquarePixels - 2, SquarePixels - 2)),
+          image(cv::Rect(inset, inset, side, side)), distance, cv::TM_SQDIFF);
+      double minimum;
+      cv::Point location;
+      cv::minMaxLoc(distance, &minimum, nullptr, &location);
+      // Screen scaling places otherwise identical outlines between normalized
+      // pixels. Refine the integer match instead of relaxing confidence limits.
+      const auto reference = image(cv::Rect(inset, inset, side, side));
+      for (float dy : {-0.5f, 0.0f, 0.5f})
+        for (float dx : {-0.5f, 0.0f, 0.5f}) {
+          if (dx == 0 && dy == 0)
+            continue;
+          cv::Mat patch;
+          cv::getRectSubPix(square, {side, side},
+                            {location.x + 1 + (side - 1) / 2.0f + dx,
+                             location.y + 1 + (side - 1) / 2.0f + dy},
+                            patch);
+          minimum = std::min(minimum, cv::norm(patch, reference, cv::NORM_L2SQR));
+        }
+      const double mse =
+          std::max(0.0, minimum) / (side * side * 3 * 255.0 * 255.0);
+      const double similarity = std::clamp(1.0 - std::sqrt(mse), 0.0, 1.0);
+      bestByClass[entry.piece] = std::max(bestByClass[entry.piece], similarity);
+    }
   }
   char piece = '?';
   double best = -1, second = -1;

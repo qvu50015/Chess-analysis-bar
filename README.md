@@ -239,9 +239,11 @@ Similarity is `1 - normalized pixel RMSE`, computed with OpenCV template matchin
 Defaults require at least 0.92 similarity and a 0.025 advantage over the next
 *distinct class*. Similarity is not a calibrated probability; even a 99% best
 match can remain Unknown if two classes are too close. Light/dark backgrounds
-are matched separately. Matching ignores a four-pixel template rim and searches
-within ±3 normalized pixels to tolerate small crop offsets and edge labels;
-large offsets still require selecting the board more precisely. Thresholds are explicit `vision::Thresholds` parameters
+are matched separately. Matching ignores an eight-pixel template rim and searches
+within ±7 normalized pixels, with half-pixel alignment refinement and cached 97%, 100%, and 103% size variants,
+to tolerate small crop offsets, size differences, and edge labels;
+large offsets still require selecting the board more precisely. Existing saved
+templates remain compatible. Thresholds are explicit `vision::Thresholds` parameters
 in the core API. Do not lower them simply to make uncertain boards appear valid.
 
 Inputs must be full, axis-aligned boards, 128–8192 pixels per side with no more
@@ -280,7 +282,9 @@ synthetic figures do not estimate Chess.com or Lichess accuracy; both remain
 **unmeasured**. The initial low-contrast synthetic glyph trial was rejected by the
 ambiguity margin; the saved fixtures use a higher-contrast test palette.
 
-Tests additionally cover all 13 classes on both backgrounds, empty/invalid images,
+Tests additionally cover fractional crop shifts of ±4.5 normalized pixels combined
+with ±1% board-size changes and isolated pixel noise, all 13 classes on both
+backgrounds, empty/invalid images,
 geometry, padded image rows, ambiguous templates, FEN placement validation,
 request coalescing, stale-result rejection, GUI responsiveness, profile isolation,
 and the captured-frame → Recognize button → displayed placement path. Existing
