@@ -16,21 +16,23 @@
 extern char **environ;
 namespace chess_eval {
 namespace {
-void ready(int fd, short events, Process::Clock::time_point deadline) {
+void ready(int fd, short events, Process::Clock::time_point deadline,
+           const CancelCheck &cancel) {
   for (;;) {
+    check_cancelled(cancel);
     auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
                          deadline - Process::Clock::now())
                          .count();
     if (remaining <= 0)
       throw std::runtime_error("Stockfish operation timed out");
     pollfd descriptor{fd, events, 0};
-    int result =
-        poll(&descriptor, 1,
-             static_cast<int>(std::min<long long>(remaining, INT_MAX)));
+    int result = poll(&descriptor, 1,
+                      static_cast<int>(std::min<long long>(
+                          remaining, cancel ? 50 : INT_MAX)));
     if (result > 0)
       return; // read/send reports EOF or socket errors.
     if (result == 0)
-      throw std::runtime_error("Stockfish operation timed out");
+      continue;
     if (errno != EINTR)
       throw std::runtime_error("Failed polling Stockfish pipe");
   }
@@ -97,11 +99,12 @@ Process::Process(const std::string &executable) {
   pid_ = child;
 }
 Process::~Process() { shutdown(); }
-void Process::send_line(const std::string &line, Clock::time_point deadline) {
+void Process::send_line(const std::string &line, Clock::time_point deadline,
+                        const CancelCheck &cancel) {
   std::string bytes = line + '\n';
   std::size_t offset = 0;
   while (offset < bytes.size()) {
-    ready(socket_, POLLOUT, deadline);
+    ready(socket_, POLLOUT, deadline, cancel);
 #ifdef MSG_NOSIGNAL
     constexpr int flags = MSG_NOSIGNAL;
 #else
@@ -119,9 +122,10 @@ void Process::send_line(const std::string &line, Clock::time_point deadline) {
           "Stockfish closed its input or failed while receiving a command");
   }
 }
-std::string Process::read_line(Clock::time_point deadline) {
+std::string Process::read_line(Clock::time_point deadline,
+                               const CancelCheck &cancel) {
   while (lines_.empty()) {
-    ready(socket_, POLLIN, deadline);
+    ready(socket_, POLLIN, deadline, cancel);
     char chunk[4096];
     auto count = read(socket_, chunk, sizeof(chunk));
     if (count > 0) {
@@ -133,6 +137,7 @@ std::string Process::read_line(Clock::time_point deadline) {
     else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
       throw std::runtime_error("Failed reading Stockfish output");
   }
+  check_cancelled(cancel);
   if (Clock::now() >= deadline)
     throw std::runtime_error("Stockfish operation timed out");
   auto result = std::move(lines_.front());

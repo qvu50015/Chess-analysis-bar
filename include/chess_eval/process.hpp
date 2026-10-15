@@ -1,4 +1,5 @@
 #pragma once
+#include "chess_eval/cancellation.hpp"
 #include "chess_eval/uci.hpp"
 #include <chrono>
 #include <deque>
@@ -13,8 +14,10 @@ public:
   ~Process();
   Process(const Process &) = delete;
   Process &operator=(const Process &) = delete;
-  void send_line(const std::string &line, Clock::time_point deadline);
-  std::string read_line(Clock::time_point deadline);
+  void send_line(const std::string &line, Clock::time_point deadline,
+                 const CancelCheck &cancel = {});
+  std::string read_line(Clock::time_point deadline,
+                        const CancelCheck &cancel = {});
   void shutdown() noexcept;
 
 private:

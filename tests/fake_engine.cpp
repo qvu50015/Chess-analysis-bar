@@ -28,6 +28,8 @@ int main() {
     } else if (line.starts_with("position fen ") && ready)
       position = true;
     else if (line.starts_with("go depth ") && position) {
+      if (mode == "slow")
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
       if (mode == "search_eof")
         return 0;
       if (mode == "search_hang")
@@ -43,6 +45,8 @@ int main() {
         std::cout << "info depth 4 score cp 99 lowerbound\ninfo depth 2 score "
                      "cp 11\n";
       }
+      std::cout << "bestmove (none)\n" << std::flush;
+    } else if (line == "stop") {
       std::cout << "bestmove (none)\n" << std::flush;
     } else if (line == "quit")
       return 0;
