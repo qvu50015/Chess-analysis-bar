@@ -33,9 +33,17 @@ private:
   std::vector<Entry> templates_;
   Thresholds thresholds_;
 };
+// Worker-local cache. Reset when templates or classifier settings change.
+// Entries are in screen order, so orientation changes only remap coordinates.
+struct RecognitionCache {
+  cv::Mat normalized;
+  std::array<Square, 64> squares{};
+  const PieceClassifier *classifier = nullptr;
+};
 RecognitionResult recognize(const cv::Mat &bgr, Orientation orientation,
                             const PieceClassifier &classifier,
-                            const std::function<bool()> &cancel = {});
+                            const std::function<bool()> &cancel = {},
+                            RecognitionCache *cache = nullptr);
 // Extract labeled squares from a permitted board image. Repeated calls add
 // variants.
 void exportTemplates(const cv::Mat &bgr, const Board &labels,

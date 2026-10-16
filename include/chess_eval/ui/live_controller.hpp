@@ -43,6 +43,7 @@ private:
   std::optional<capture::Frame> latest_;
   std::optional<chess::Tracker> tracker_;
   QString directory_, submittedFen_;
+  QImage submittedImage_;
   vision::Orientation orientation_ = vision::Orientation::WhiteBottom;
   uint64_t epoch_ = 0;
   bool active_ = false, inFlight_ = false;

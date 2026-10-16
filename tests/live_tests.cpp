@@ -307,6 +307,44 @@ int main(int argc, char **argv) {
     check(!slow.active(), "New capture session requires resync");
     slow.shutdown();
     waitFor([&] { return !slow.busy(); });
+    // Hold a frame that would confirm e4 while the opponent's reply arrives.
+    // Preserve legal history, but publish only the latest e5 position.
+    std::atomic_bool held{false}, release{false};
+    int64_t firstE4 = -1;
+    LiveController behind(nullptr, [&](const RecognitionRequest &request,
+                                       const std::function<bool()> &cancel) {
+      const int marker = request.image.pixelColor(0, 0).red();
+      if (marker == 2) {
+        if (firstE4 < 0)
+          firstE4 = request.observationMs;
+        if (request.observationMs - firstE4 >= 300 && !release) {
+          held = true;
+          while (!release && !cancel())
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+      }
+      RecognitionResult result;
+      result.fenPlacement = marker == 1   ? initial.placement()
+                            : marker == 2 ? e4.placement()
+                                          : e5.placement();
+      return result;
+    });
+    std::vector<QString> caughtUp;
+    QObject::connect(&behind, &LiveController::positionConfirmed, &app,
+                     [&](const QString &fen) { caughtUp.push_back(fen); });
+    behind.setFrame(marked(1, 1));
+    behind.watch("test", Orientation::WhiteBottom, true);
+    waitFor([&] { return caughtUp.size() == 1; });
+    behind.setFrame(marked(2, 2));
+    waitFor([&] { return held.load(); });
+    behind.setFrame(marked(3, 3));
+    release = true;
+    waitFor([&] { return caughtUp.size() >= 2; });
+    check(caughtUp.size() == 2 && caughtUp.back().toStdString() == e5.fen(),
+          "A new frame during recognition skips stale evaluation and catches "
+          "up automatically");
+    behind.shutdown();
+    waitFor([&] { return !behind.busy(); });
     // Exercise the actual Window wiring and both existing profile selectors.
     Window window;
     window.show();

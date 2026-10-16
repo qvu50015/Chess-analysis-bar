@@ -359,12 +359,17 @@ an actionable message. Engine errors appear in the Live analysis tab; correct th
 settings and Stop/Start to retry the retained game. **Reset** establishes a new
 standard starting baseline for a new game; Stop/Start alone does not reset history.
 
-Recognition and bounded legal recovery run on a persistent worker, at most four
-requests per second, with one in-flight request and one latest captured frame. Tracking uses a worker-owned
+Recognition and bounded legal recovery run on a persistent worker, polling every
+100 ms with one in-flight request and one latest captured frame. If a newer image
+arrives during recognition, it is processed immediately afterward; legal history
+is retained but the older frame is not submitted for evaluation. Tracking uses a worker-owned
 copy and only publishes it if the request generation is still current. Recovery
 is cancellable, enumerates legal successors without repeated move validation,
 and caches failed placements until the candidate or authoritative state changes.
 Templates are cached for the session and reloaded on Start; identical images reuse the last recognition result.
+Changed images reuse classification only for exactly unchanged normalized squares,
+so an ordinary move typically classifies two squares instead of all 64. Cache
+updates are atomic per completed frame and cleared when templates reload.
 ScreenCaptureKit may not deliver new frames for a static screen, so the latest
 unchanged image is retained for stability checks until a new frame or capture-stop
 notification arrives. No image processing or engine I/O runs on the Qt thread.
@@ -396,6 +401,7 @@ in both orientations. It also covers both profile selectors, slow recognition,
 rapid frame replacement, skipped intermediate boards followed by automatic
 evaluation, automatic starting-board orientation for both colors,
 Stop/Start orientation retention, Reset with a flipped board, highlighted move squares,
+and a move arriving during recognition without publishing the older score,
 stale-result cancellation, capture loss, template errors,
 and responsive shutdown. Existing M1–M4 tests and optional real-Stockfish tests
 remain enabled. These automated checks do not establish live-site recognition

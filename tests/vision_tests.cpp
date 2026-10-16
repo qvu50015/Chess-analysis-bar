@@ -280,6 +280,52 @@ int main(int argc, char **argv) {
                   cv::FILLED);
     check(selectedClassifier.classify(lightQueenSquare, false).piece == '?',
           "Finer alignment cannot restore an obscured queen");
+    struct CountingClassifier : PieceClassifier {
+      const PieceClassifier &delegate;
+      mutable int calls = 0;
+      explicit CountingClassifier(const PieceClassifier &value)
+          : delegate(value) {}
+      Square classify(const cv::Mat &square, bool dark) const override {
+        ++calls;
+        return delegate.classify(square, dark);
+      }
+    } counting(classifier);
+    RecognitionCache cache;
+    check(recognize(cleanBoard, Orientation::WhiteBottom, counting, {}, &cache)
+                      .fenPlacement == expected &&
+              counting.calls == 64,
+          "First cached frame classifies all squares");
+    recognize(cleanBoard, Orientation::WhiteBottom, counting, {}, &cache);
+    check(counting.calls == 64, "Unchanged frame reuses every square");
+    auto movedBoard = cleanBoard.clone();
+    const cv::Rect source(4 * 48, 6 * 48, 48, 48),
+        destination(4 * 48, 4 * 48, 48, 48);
+    auto emptySquare = movedBoard(destination).clone();
+    movedBoard(source).copyTo(movedBoard(destination));
+    emptySquare.copyTo(movedBoard(source));
+    auto cachedMove =
+        recognize(movedBoard, Orientation::WhiteBottom, counting, {}, &cache);
+    check(counting.calls == 66 &&
+              cachedMove.fenPlacement ==
+                  "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR",
+          "A move reclassifies only its two changed squares");
+    auto rotated =
+        recognize(movedBoard, Orientation::BlackBottom, counting, {}, &cache);
+    check(counting.calls == 66 && rotated.board.squares[63 - 36].piece == 'P',
+          "Cached screen squares remap correctly for Black orientation");
+    int cancellationChecks = 0;
+    rejects([&] {
+      recognize(
+          cleanBoard, Orientation::WhiteBottom, counting,
+          [&] { return ++cancellationChecks > 40; }, &cache);
+    });
+    check(cv::norm(cache.normalized, preprocess(movedBoard), cv::NORM_INF) == 0,
+          "Cancelled recognition cannot commit a partially updated cache");
+    cache = {};
+    const int beforeReload = counting.calls;
+    recognize(movedBoard, Orientation::WhiteBottom, counting, {}, &cache);
+    check(counting.calls == beforeReload + 64,
+          "Template reload invalidates every cached square");
     QTemporaryDir incomplete;
     // Real capture regression: these pawns are identical artwork, but board
     // normalization lands their outlines on different fractional pixels.

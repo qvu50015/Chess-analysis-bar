@@ -11,6 +11,7 @@ RecognitionController::Processor cachedProcessor() {
     std::unique_ptr<vision::TemplateClassifier> classifier;
     QImage image;
     vision::RecognitionResult result;
+    vision::RecognitionCache squares;
   };
   auto cache = std::make_shared<Cache>();
   // Cache belongs exclusively to the recognition thread. A new Start reloads
@@ -26,6 +27,7 @@ RecognitionController::Processor cachedProcessor() {
       }
       cache->epoch = request.templateEpoch;
       cache->image = {};
+      cache->squares = {};
     }
     if (cancel())
       throw std::runtime_error("Recognition cancelled");
@@ -35,8 +37,9 @@ RecognitionController::Processor cachedProcessor() {
         orientation = orientation == vision::Orientation::WhiteBottom
                           ? vision::Orientation::BlackBottom
                           : vision::Orientation::WhiteBottom;
-      auto result = vision::recognize(vision::toBgr(request.image), orientation,
-                                      *cache->classifier, cancel);
+      auto result =
+          vision::recognize(vision::toBgr(request.image), orientation,
+                            *cache->classifier, cancel, &cache->squares);
       // Resolve board rotation against the known starting position. Rotation
       // changes coordinates, never the side to move (White starts either way).
       if (!cache->oriented && request.tracker && result.fenPlacement) {
@@ -66,7 +69,7 @@ LiveController::LiveController(QObject *parent,
                                RecognitionController::Processor processor)
     : QObject(parent), recognition_(nullptr, processor ? std::move(processor)
                                                        : cachedProcessor()) {
-  timer_.setInterval(250);
+  timer_.setInterval(100);
   connect(&timer_, &QTimer::timeout, this, &LiveController::poll);
   connect(&recognition_, &RecognitionController::tracked, this,
           &LiveController::accept);
@@ -164,6 +167,7 @@ void LiveController::poll() {
   if (!active_ || !latest_ || inFlight_)
     return;
   inFlight_ = true;
+  submittedImage_ = latest_->pixels;
   recognition_.submit({latest_->pixels,
                        directory_,
                        orientation_,
@@ -180,6 +184,15 @@ void LiveController::accept(const vision::RecognitionResult &result,
   if (!active_ || !tracker_)
     return;
   tracker_ = tracker;
+  // Keep legally recovered history, but do not analyze an older captured board
+  // when new pixels arrived during recognition. Consume the latest frame next.
+  if (latest_ && latest_->pixels != submittedImage_) {
+    suspend();
+    emit statusChanged(
+        "Live analysis active — catching up to the latest frame.");
+    QTimer::singleShot(0, this, &LiveController::poll);
+    return;
+  }
   using chess::TrackingState;
   if (observation.state == TrackingState::Resync) {
     suspend();

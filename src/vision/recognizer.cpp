@@ -325,18 +325,39 @@ Square TemplateClassifier::classify(const cv::Mat &square, bool dark) const {
 }
 RecognitionResult recognize(const cv::Mat &bgr, Orientation orientation,
                             const PieceClassifier &classifier,
-                            const std::function<bool()> &cancel) {
+                            const std::function<bool()> &cancel,
+                            RecognitionCache *cache) {
   const auto start = std::chrono::steady_clock::now();
   auto normalized = preprocess(bgr);
   auto squares = extractSquares(normalized);
   RecognitionResult result;
+  const bool reusable =
+      cache && cache->classifier == &classifier && !cache->normalized.empty();
+  std::array<cv::Mat, 64> previous;
+  if (reusable)
+    previous = extractSquares(cache->normalized);
+  std::array<Square, 64> screen;
   for (int row = 0; row < 8; ++row)
     for (int col = 0; col < 8; ++col) {
       if (cancel && cancel())
         throw std::runtime_error("Recognition cancelled");
+      const int index = row * 8 + col;
+      screen[index] =
+          reusable &&
+                  cv::norm(squares[index], previous[index], cv::NORM_INF) == 0
+              ? cache->squares[index]
+              : classifier.classify(squares[index], (row + col) % 2 != 0);
       result.board.squares[canonicalIndex(row, col, orientation)] =
-          classifier.classify(squares[row * 8 + col], (row + col) % 2 != 0);
+          screen[index];
     }
+  if (cancel && cancel())
+    throw std::runtime_error("Recognition cancelled");
+  // Commit only a complete frame; cancellation cannot leave mixed cache data.
+  if (cache) {
+    cache->normalized = std::move(normalized);
+    cache->squares = screen;
+    cache->classifier = &classifier;
+  }
   result.errors = validate(result.board);
   result.fenPlacement = placement(result.board);
   result.milliseconds = std::chrono::duration<double, std::milli>(
